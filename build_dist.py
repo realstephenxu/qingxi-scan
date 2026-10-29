@@ -9,7 +9,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-VERSION = '1.1.0'
+VERSION = '1.1.1'
 RELEASE = '清晰扫描_v{}_UOS分发包'.format(VERSION)
 DEB = 'qingxi-scan_{}_all.deb'.format(VERSION)
 SOURCE = Path(__file__).resolve().parent

@@ -355,6 +355,9 @@ class Window(QMainWindow):
         self.composite_btn = button('查看合页效果', self.toggle_composite)
         self.composite_btn.setCheckable(True)
         title_row.addWidget(self.composite_btn)
+        self.clear_btn = button('清空全部', self.clear_document, 'danger')
+        self.clear_btn.setToolTip('清空当前文档的全部页面，保留扫描设置和保存位置；可撤销。')
+        title_row.addWidget(self.clear_btn)
         title_row.addStretch()
         self.count = label('尚未扫描', 'muted')
         title_row.addWidget(self.count)
@@ -551,7 +554,10 @@ class Window(QMainWindow):
         self.rescan_btn.setEnabled(selected and ready)
         self.page_actions.setEnabled(selected and not self.busy)
         self.remove_btn.setEnabled(selected and not self.busy)
+        self.clear_btn.setEnabled(count > 0 and not self.busy)
         self.restore_btn.setEnabled(not self.busy)
+        self.restore_btn.setVisible(bool(self.removed))
+        self.restore_btn.setText('撤销清空' if self.removed and self.removed[-1].get('cleared') else '撤销移除')
         self.undo_btn.setEnabled(selected and bool(self.current_page().operations) and not self.busy and not self.composite_btn.isChecked())
         self.export_btn.setEnabled(count > 0 and not self.busy and (layout != 'card' or count == 2))
         self.open_btn.setEnabled(bool(self.session.last_export))
@@ -718,6 +724,9 @@ class Window(QMainWindow):
             except Exception as error:
                 self.message('页面读取失败：' + str(error), True)
         else:
+            self.view.scene().clear()
+            self.view.picture = None
+            self.view.resetTransform()
             self.page_info.setText('预览区支持 Ctrl + 滚轮缩放')
         self.composite_btn.setText('返回原图编辑' if self.composite_btn.isChecked() else '查看合页效果')
         self.update_state()
@@ -772,20 +781,50 @@ class Window(QMainWindow):
         page = self.current_page()
         if page:
             index = self.session.pages.index(page)
-            self.removed.append((index, page))
+            self.removed.append({'pages': [(index, page)]})
             self.session.pages.pop(index)
-            self.restore_btn.show()
             self.remember(True)
             self.rebuild_pages()
             self.message('已从文档中移除该页。需要恢复时点击“撤销移除”。')
 
+    def clear_document(self):
+        if self.busy or not self.session.pages:
+            return
+        self.autosave.stop()
+        selected = self.current_page()
+        count = len(self.session.pages)
+        previous_name = self.name.text()
+        self.removed.append({'pages': list(enumerate(self.session.pages)), 'cleared': True,
+                             'name': previous_name, 'last_export': self.session.last_export,
+                             'selected': selected.id if selected else None})
+        self.session.pages = []
+        self.session.last_export = ''
+        self.session.exported_revision = -1
+        self.composite_btn.setChecked(False)
+        base = self.default_name()
+        new_name, suffix = base, 2
+        extension = '.pdf' if self.format.currentData() == 'pdf' else ''
+        folder = Path(self.directory.text()).expanduser()
+        while new_name == previous_name or (folder / (new_name + extension)).exists():
+            new_name = base + '_' + str(suffix)
+            suffix += 1
+        self.name.setText(new_name)
+        self.remember(True)
+        self.rebuild_pages()
+        self.message('已清空 {} 页，可以开始下一份扫描。误操作可点右侧“撤销清空”恢复；已保存的文件保留。'.format(count))
+
     def restore(self):
-        if self.removed:
-            index, page = self.removed.pop()
-            self.session.pages.insert(min(index, len(self.session.pages)), page)
-            self.restore_btn.setVisible(bool(self.removed))
+        if self.removed and not self.busy:
+            entry = self.removed.pop()
+            was_empty = not self.session.pages
+            for index, page in entry['pages']:
+                self.session.pages.insert(min(index, len(self.session.pages)), page)
+            if entry.get('cleared') and was_empty:
+                self.name.setText(entry['name'])
+                self.session.last_export = entry['last_export']
             self.remember(True)
-            self.rebuild_pages(page.id)
+            self.rebuild_pages(entry.get('selected') or entry['pages'][-1][1].id)
+            self.message('已恢复清空前的全部页面。' if entry.get('cleared') else '已恢复移除的页面。')
 
     def set_busy(self, busy):
         self.busy = busy

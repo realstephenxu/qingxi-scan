@@ -403,6 +403,82 @@ class GuiTests(unittest.TestCase):
         window.load_settings()
         self.assertEqual(window.layout_combo.currentData(), 'single')
 
+    def test_clear_all_and_undo_preserve_export_settings_and_edits(self):
+        window = self.window
+        self.scan()
+        window.crop([20, 30, 500, 600])
+        self.scan()
+        window.rotate(True)
+        window.move(-1)
+        ids = [page.id for page in window.session.pages]
+        operations = json.loads(json.dumps([page.operations for page in window.session.pages]))
+        window.directory.setText(str(self.root))
+        window.name.setText('已保存材料')
+        window.export_btn.click()
+        self.pump(lambda: not window.busy)
+        saved = self.root / '已保存材料.pdf'
+        content = saved.read_bytes()
+        selected = window.current_page().id
+        window.clear_btn.click()
+        self.assertEqual(window.session.pages, [])
+        self.assertEqual(window.pages_list.count(), 0)
+        self.assertEqual(window.stack.currentIndex(), 0)
+        self.assertEqual(window.view.scene().items(), [])
+        self.assertIsNone(window.view.picture)
+        self.assertFalse(window.export_btn.isEnabled())
+        self.assertFalse(window.clear_btn.isEnabled())
+        self.assertFalse(window.open_btn.isEnabled())
+        self.assertEqual(window.scan_btn.text(), '扫描第 1 页')
+        self.assertEqual(window.directory.text(), str(self.root))
+        self.assertNotEqual(window.name.text(), '已保存材料')
+        self.assertEqual(Session(self.root / 'data').pages, [])
+        self.assertEqual(saved.read_bytes(), content)
+        self.assertEqual(window.restore_btn.text(), '撤销清空')
+        window.restore_btn.click()
+        self.assertEqual([page.id for page in window.session.pages], ids)
+        self.assertEqual([page.operations for page in window.session.pages], operations)
+        self.assertEqual(window.current_page().id, selected)
+        self.assertEqual(window.name.text(), '已保存材料')
+        self.assertEqual(window.session.last_export, str(saved))
+        self.assertEqual(saved.read_bytes(), content)
+
+    def test_clear_card_preview_and_scan_again_with_busy_guard(self):
+        window = self.window
+        window.layout_combo.setCurrentIndex(1)
+        self.scan()
+        self.scan()
+        original = [page.id for page in window.session.pages]
+        window.composite_btn.click()
+        window.set_busy(True)
+        self.assertFalse(window.clear_btn.isEnabled())
+        window.clear_document()
+        self.assertEqual([page.id for page in window.session.pages], original)
+        window.set_busy(False)
+        window.clear_btn.click()
+        self.assertFalse(window.composite_btn.isChecked())
+        self.assertEqual(window.layout_combo.currentData(), 'card')
+        self.assertEqual(window.paper.currentData(), (100, 70))
+        self.assertEqual(window.scan_btn.text(), '扫描正面')
+        self.assertTrue(window.scan_btn.isEnabled())
+        self.scan()
+        self.assertEqual(len(window.session.pages), 1)
+        self.assertNotIn(window.session.pages[0].id, original)
+        self.assertEqual(len(Session(self.root / 'data').pages), 1)
+
+    def test_clear_undo_is_one_action_after_individual_removal(self):
+        window = self.window
+        for _ in range(3):
+            self.scan()
+        original = [page.id for page in window.session.pages]
+        window.pages_list.setCurrentRow(1)
+        window.remove_btn.click()
+        window.clear_btn.click()
+        window.restore_btn.click()
+        self.assertEqual([page.id for page in window.session.pages], [original[0], original[2]])
+        self.assertEqual(window.restore_btn.text(), '撤销移除')
+        window.restore_btn.click()
+        self.assertEqual([page.id for page in window.session.pages], original)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
