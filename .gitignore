@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+workspaces/
+current.json
+app.lock
+*.pnm
+*.pnm.part
+*.png.part
+*.pdf
+*.deb
+*.tar.gz
+dist/
+.env
+.env.*
